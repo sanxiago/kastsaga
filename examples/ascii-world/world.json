@@ -16,12 +16,17 @@
     "############"
   ],
   "objects": [
-    { "id": "obj:chest", "type": "chest", "x": 5, "y": 4 },
-    { "id": "obj:herb", "type": "herb", "x": 5, "y": 4 }
+    { "id": "obj:chest", "type": "chest", "glyph": "📦", "description": "A worn wooden chest bound with iron.", "x": 5, "y": 4 },
+    { "id": "obj:herb", "type": "herb", "glyph": "🌿", "description": "A bundle of fresh green herbs.", "x": 5, "y": 4 }
   ],
   "entities": [
-    { "id": "player:you", "role": "player", "glyph": "🙂", "displayWidth": 2, "x": 2, "y": 5, "emote": "alert", "emoteWidth": 2 },
-    { "id": "npc:guard", "role": "npc", "glyph": "🧍", "displayWidth": 2, "x": 5, "y": 5 },
-    { "id": "npc:dog", "role": "npc", "glyph": "🐕", "displayWidth": 2, "x": 8, "y": 5, "emote": "curious", "emoteWidth": 2 }
-  ]
+    { "id": "player:you", "role": "player", "glyph": "🙂", "displayWidth": 2, "description": "You, a curious traveler.", "x": 2, "y": 5, "emote": "alert", "emoteWidth": 2 },
+    { "id": "npc:guard", "role": "npc", "glyph": "🧍", "displayWidth": 2, "description": "A town guard keeping watch.", "x": 5, "y": 5 },
+    { "id": "npc:dog", "role": "npc", "glyph": "🐕", "displayWidth": 2, "description": "A friendly dog wagging its tail.", "x": 8, "y": 5, "emote": "curious", "emoteWidth": 2 }
+  ],
+  "descriptions": {
+    "terrain": { "#": "A solid stone wall.", ".": "Packed dirt ground.", "~": "Shallow water rippling." },
+    "objects": { "chest": "A worn wooden chest bound with iron.", "herb": "A bundle of fresh green herbs." },
+    "entities": { "player": "A player.", "npc": "A non-player character.", "dog": "A dog." }
+  }
 }
