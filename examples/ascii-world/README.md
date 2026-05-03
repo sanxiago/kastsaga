@@ -27,7 +27,8 @@ node move.js other.json
 ## Rendering rules implemented
 - Layer order: terrain → object → entity. One entity per cell; entity glyph replaces object glyph in the grid.
 - Objects: if multiple in a cell, show stack marker (`stack` glyph) and list contents in legend summary.
-- Emotes: shown adjacent to entity glyph (fixed two-character cell width). Emote glyphs come from `legend.emotes`.
+- Glyphs: may be ASCII or Unicode/emoji. Renderer measures grapheme width and pads columns to keep alignment.
+- Emotes: shown adjacent to entity glyph. Emoji emotes are supported; width hints in `world.json` are respected.
 - Legend: includes only glyphs/emotes actually present in the rendered viewport; no leakage beyond observation.
 - Deterministic: same observation → identical output.
 

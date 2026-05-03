@@ -1,7 +1,23 @@
 import fs from 'node:fs';
+import { wcwidth } from './wcwidth.js';
 
 function key(x, y) {
   return `${x},${y}`;
+}
+
+function graphemeClusters(str) {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  return Array.from(segmenter.segment(str), s => s.segment);
+}
+
+function glyphWidth(glyph, displayWidthHint) {
+  if (typeof displayWidthHint === 'number') return displayWidthHint;
+  if (glyph === '' || glyph == null) return 0;
+  let width = 0;
+  for (const g of graphemeClusters(glyph)) {
+    width += wcwidth(g);
+  }
+  return width || 1;
 }
 
 export function loadObservation(p) {
@@ -19,7 +35,7 @@ export function render(observation) {
     return Array.from({ length: width }, (_, col) => {
       const x = origin.x + col;
       const glyph = terrainRow[col] ?? ' ';
-      return { terrainGlyph: glyph, cell: glyph }; // base glyph
+      return { terrainGlyph: glyph, cell: glyph, width: glyphWidth(glyph) }; // base glyph
     });
   });
 
@@ -54,8 +70,9 @@ export function render(observation) {
       const cellObjects = objectsByCell.get(k) || [];
       let objectGlyph = null;
       if (cellObjects.length === 1) {
-        const type = cellObjects[0].type;
-        objectGlyph = legend.objects?.[type] || '?';
+        const obj = cellObjects[0];
+        const type = obj.type;
+        objectGlyph = obj.glyph || legend.objects?.[type] || '?';
         used.objects.add(objectGlyph);
       } else if (cellObjects.length > 1) {
         objectGlyph = legend.objects?.stack || '*';
@@ -65,28 +82,48 @@ export function render(observation) {
       // Entities
       const ent = entitiesByCell.get(k);
       let entGlyph = null;
-      let emoteGlyph = ' ';
+      let entWidthHint = undefined;
+      let emoteGlyph = '';
+      let emoteWidthHint = undefined;
       if (ent) {
         entGlyph = ent.glyph || legend.entities?.[ent.role] || '@';
+        entWidthHint = ent.displayWidth;
         used.entities.add(entGlyph);
         if (ent.emote) {
-          emoteGlyph = legend.emotes?.[ent.emote] || '!';
+          emoteGlyph = legend.emotes?.[ent.emote] || ent.emote;
+          emoteWidthHint = ent.emoteWidth ?? undefined;
           used.emotes.add(emoteGlyph);
         }
       }
 
       // Resolve layering: terrain -> object -> entity
       if (entGlyph) {
-        cell.cell = entGlyph + emoteGlyph; // 2-char cell when entity present
+        cell.cell = entGlyph + emoteGlyph;
+        cell.width = glyphWidth(entGlyph, entWidthHint) + glyphWidth(emoteGlyph, emoteWidthHint || 0);
       } else if (objectGlyph) {
-        cell.cell = objectGlyph + ' ';
+        cell.cell = objectGlyph;
+        cell.width = glyphWidth(objectGlyph, undefined);
       } else {
-        cell.cell = cell.terrainGlyph + ' ';
+        cell.cell = cell.terrainGlyph;
+        cell.width = glyphWidth(cell.terrainGlyph, undefined);
       }
     }
   }
 
-  const rows = grid.map(row => row.map(c => c.cell.padEnd(2, ' ')).join(''));
+  // Determine uniform cell width for alignment (min 2)
+  const maxCellWidth = Math.max(
+    2,
+    ...grid.flat().map(c => c.width)
+  );
+
+  const rows = grid.map(row =>
+    row
+      .map(c => {
+        const pad = Math.max(0, maxCellWidth - c.width);
+        return c.cell + ' '.repeat(pad);
+      })
+      .join('')
+  );
 
   const legendLines = [];
   legendLines.push('Legend:');
@@ -107,7 +144,7 @@ export function render(observation) {
     for (const g of used.emotes) legendLines.push(`    ${g} = emote`);
   }
 
-  return { rows, legendLines };
+  return { rows, legendLines, cellWidth: maxCellWidth };
 }
 
 export function renderToText(observation) {

@@ -1,10 +1,10 @@
-# World Rendering (ASCII Baseline)
+# World Rendering (Grid Baseline)
 
 ## Purpose
-Provide a minimal, deterministic ASCII rendering of a viewer's observation to reach a playable/diagnostic slice before full 2D rendering. This is a baseline profile that can be superseded by richer rendering without changing semantics.
+Provide a minimal, deterministic grid rendering of a viewer's observation (text-based) to reach a playable/diagnostic slice before full 2D rendering. Glyphs may be ASCII or Unicode/emoji. This is a baseline profile that can be superseded by richer rendering without changing semantics.
 
 ## Scope
-- Rendering a viewer's observation into a rectangular ASCII grid plus legend.
+- Rendering a viewer's observation into a rectangular text grid plus legend.
 - Viewport definition and layering (terrain, objects, entities, emotes/status).
 - Boundaries/void depiction and no-leakage guarantees.
 - Update triggers (cadence remains open per Q2.4).
@@ -13,13 +13,13 @@ Out of scope: engine choice, final UI/UX, network replication, cadence decision,
 
 ## Requirements
 
-### Requirement: ASCII rendering capability
-The system SHALL provide a rendering capability that converts a viewer's observation into a rectangular ASCII grid (rows of characters) plus a legend. The renderer SHALL be deterministic given the same observation input.
+### Requirement: Text rendering capability (ASCII/Unicode)
+The system SHALL provide a rendering capability that converts a viewer's observation into a rectangular grid (rows of glyphs) plus a legend. Glyphs MAY be ASCII or Unicode graphemes (including emoji). The renderer SHALL be deterministic given the same observation input and glyph set.
 
 #### Scenario: Deterministic render from same observation
 - **GIVEN** the same observation for a viewer entity
 - **WHEN** the renderer is invoked twice with that observation
-- **THEN** the ASCII grid and legend produced are identical
+- **THEN** the grid and legend produced are identical, including any Unicode/emoji glyphs
 
 ### Requirement: Viewport definition
 The renderer SHALL define a viewport with origin and extent (width × height) relative to world coordinates. Content outside the viewport SHALL NOT be rendered. Viewport selection strategy (follow player, fixed camera, etc.) is configurable and MUST NOT leak information beyond the viewer's observation.
@@ -60,14 +60,24 @@ If an entity's observation metadata includes an emote or short status code, the 
 - **THEN** the entity cell shows the emote alongside the glyph (e.g., `@!`)
 - **AND** the legend explains the emote marker
 
+### Requirement: Unicode-safe glyph handling
+The renderer SHALL treat glyphs and emotes as Unicode grapheme clusters and account for their display width when composing the grid. The renderer SHALL pad or truncate consistently so that column alignment is preserved regardless of glyph width.
+
+#### Scenario: Wide emoji does not break alignment
+- **GIVEN** an observation where an entity glyph is an emoji that renders double-width
+- **WHEN** the renderer outputs the grid
+- **THEN** columns remain aligned across rows
+- **AND** the emoji appears in the correct cell without overlapping adjacent cells
+
 ### Requirement: Legend
-The renderer SHALL output a legend that maps each glyph used in the viewport to its meaning (terrain types, objects, entities, emote/status markers). The legend SHALL be derived from the same observation and SHALL NOT include entities or tiles outside the viewport.
+The renderer SHALL output a legend that maps each glyph used in the viewport to its meaning (terrain types, objects, entities, emote/status markers). The legend SHALL be derived from the same observation and SHALL NOT include entities or tiles outside the viewport. The legend SHALL display the exact glyphs used in the grid (including emoji) or their explicit fallbacks if substitutions are made.
 
 #### Scenario: Legend matches visible glyphs
 - **GIVEN** a viewport that includes a wall `#` and a player `@`
 - **WHEN** the renderer emits the legend
 - **THEN** the legend contains entries for `#` and `@` with their meanings
 - **AND** the legend omits glyphs not present in the current viewport
+- **AND** if a glyph is an emoji, the legend shows that emoji (or the fallback actually rendered)
 
 ### Requirement: No information leakage
 The renderer SHALL display only what is present in the viewer's observation. Tiles, objects, entities, or emotes not in observation SHALL NOT be rendered.
