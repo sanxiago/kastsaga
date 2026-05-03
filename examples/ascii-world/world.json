@@ -1,0 +1,27 @@
+{
+  "viewport": { "origin": { "x": 0, "y": 0 }, "width": 12, "height": 7 },
+  "legend": {
+    "terrain": { "wall": "#", "floor": ".", "water": "~" },
+    "objects": { "chest": "C", "herb": "h", "stack": "*" },
+    "entities": { "player": "@", "npc": "n", "dog": "d" },
+    "emotes": { "alert": "!", "curious": "?" }
+  },
+  "terrainRows": [
+    "############",
+    "#..........#",
+    "#..~~..#...#",
+    "#..~~..#...#",
+    "#..........#",
+    "#..........#",
+    "############"
+  ],
+  "objects": [
+    { "id": "obj:chest", "type": "chest", "x": 5, "y": 4 },
+    { "id": "obj:herb", "type": "herb", "x": 5, "y": 4 }
+  ],
+  "entities": [
+    { "id": "player:you", "role": "player", "glyph": "@", "x": 2, "y": 5, "emote": "alert" },
+    { "id": "npc:guard", "role": "npc", "glyph": "n", "x": 5, "y": 5 },
+    { "id": "npc:dog", "role": "npc", "glyph": "d", "x": 8, "y": 5, "emote": "curious" }
+  ]
+}
