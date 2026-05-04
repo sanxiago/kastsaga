@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Interactive movement demo for the ASCII world.
-// Arrow keys move the player; optional LLM-driven NPC via OpenRouter.
+// Arrow keys move the player; optional LLM-driven NPC with agency via OpenRouter/OLLAMA.
 
 import path from 'node:path';
 import url from 'node:url';
@@ -23,11 +23,21 @@ const NPC_PATROL = [
   { dx: 0, dy: 1 }
 ];
 
-const NPC_MODE = process.env.NPC_MODE || 'patrol'; // 'patrol' | 'llm'
+const NPC_MODE = process.env.NPC_MODE || 'patrol'; // 'patrol' | 'llm' | 'ollama'
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'openrouter/auto';
 const OPENROUTER_BASE = process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1';
 const OPENROUTER_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || 10000);
+
+// OLLAMA settings
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_BASE || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'glm-4.7-flash:opencode_slow_max_ctx_thinking';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
+
+// NPC Agency Settings
+const NPC_GOAL_TYPE = process.env.NPC_GOAL || 'protect';
+const NPC_GOAL_TARGET = process.env.NPC_GOAL_TARGET || 'chest';
+const NPC_GOAL_REASONING = process.env.NPC_GOAL_REASONING || '';
 
 function findPlayer(observation) {
   return observation.entities.find(e => e.role === 'player') || observation.entities[0];
@@ -88,26 +98,66 @@ function describeCell(observation, x, y) {
   return out;
 }
 
-function inspect(observation) {
-  const player = findPlayer(observation);
-  if (!player) return ['No player entity found'];
-  const coords = [
-    { x: player.x, y: player.y, label: 'Here' },
-    { x: player.x + 1, y: player.y, label: 'East' },
-    { x: player.x - 1, y: player.y, label: 'West' },
-    { x: player.x, y: player.y - 1, label: 'North' },
-    { x: player.x, y: player.y + 1, label: 'South' }
-  ];
-  const lines = [];
-  for (const c of coords) {
-    const descs = describeCell(observation, c.x, c.y);
-    if (descs.length) {
-      lines.push(`${c.label}:`);
-      lines.push(...descs.map(d => `  ${d}`));
-    }
-  }
-  if (!lines.length) lines.push('Nothing notable nearby.');
-  return lines;
+// NPC Memory State
+const npcState = {
+  npcId: 'npc:guard',
+  goal: {
+    type: NPC_GOAL_TYPE,
+    target: NPC_GOAL_TARGET,
+    reasoning: NPC_GOAL_REASONING || getDefaultReasoning(NPC_GOAL_TYPE, NPC_GOAL_TARGET),
+    priority: 1
+  },
+  memory: {
+    seen: [],
+    attempts: [],
+    blockedCount: 0
+  },
+  currentIntent: 'patrolling'
+};
+
+function getDefaultReasoning(goalType, target) {
+  const reasoningMap = {
+    protect: `Protecting ${target} from unauthorized access`,
+    gather: `Collecting needed items: ${target}`,
+    patrol: `Patrolling the area and maintaining security`
+  };
+  return reasoningMap[goalType] || `Working on ${goalType} - ${target}`;
+}
+
+function addObservation(observation, npcId) {
+  const npc = observation.entities.find(e => e.id === npcId);
+  if (!npc) return;
+
+  const snapshot = {
+    turn: Date.now(),
+    location: `(${npc.x},${npc.y})`,
+    visibleEntities: observation.entities.map(e => e.id).filter(id => id !== npcId),
+    nearbyObjects: observation.objects.map(o => `${o.type} at (${o.x},${o.y})`).slice(0, 5),
+    nearbyEntities: observation.entities
+      .filter(e => e.role !== 'player' && e.id !== npcId)
+      .map(e => `${e.id} at (${e.x},${e.y})`)
+  };
+
+  npcState.memory.seen.push(snapshot);
+}
+
+function addAttempt(action, result, reason) {
+  npcState.memory.attempts.push({
+    turn: Date.now(),
+    action: action,
+    result: result,
+    reason: reason
+  });
+}
+
+function getObservationHistory(n = 3) {
+  const start = Math.max(0, npcState.memory.seen.length - n);
+  return npcState.memory.seen.slice(start);
+}
+
+function getRecentAttempts(n = 3) {
+  const start = Math.max(0, npcState.memory.attempts.length - n);
+  return npcState.memory.attempts.slice(start);
 }
 
 function attemptDialogue(observation, speaker, listener) {
@@ -136,7 +186,20 @@ function printState(observation, message, extraLines = []) {
   if (message) console.log(`\n${message}`);
   for (const line of extraLines) console.log(line);
   console.log('\nControls: arrows move, i inspect, space talk (adjacent), q quit');
-  console.log(`NPC mode: ${NPC_MODE}${NPC_MODE === 'llm' && !OPENROUTER_API_KEY ? ' (no API key; falling back to patrol)' : ''}`);
+  if (NPC_MODE === 'llm' && OPENROUTER_API_KEY) {
+    console.log(`NPC mode: llm (OpenRouter)`);
+  } else if (NPC_MODE === 'ollama' && OLLAMA_BASE) {
+    console.log(`NPC mode: ollama (${OLLAMA_BASE}, model: ${OLLAMA_MODEL})`);
+  } else {
+    console.log(`NPC mode: patrol`);
+  }
+  if (npcState.goal && npcState.goal.type) {
+    console.log(`\nNPC Goal: ${npcState.goal.type} - ${npcState.goal.target}`);
+    if (npcState.goal.reasoning) {
+      console.log(`  Reasoning: ${npcState.goal.reasoning}`);
+    }
+  }
+  console.log(`Intent: I am ${npcState.currentIntent}`);
 }
 
 function patrolNPC(observation, stepIdxRef) {
@@ -161,10 +224,12 @@ async function planNPCWithLLM(observation) {
   const player = findPlayer(observation);
   if (!npc || !player) return { action: 'fallback', reason: 'No NPC or player' };
 
+  addObservation(observation, npc.id);
+
   const rows = observation.terrainRows.map((row, y) => {
     const chars = row.split('');
     for (const obj of observation.objects || []) {
-      if (obj.y === y) chars[obj.x] = chars[obj.x]; // keep terrain, descriptions are separate
+      if (obj.y === y) chars[obj.x] = chars[obj.x];
     }
     for (const ent of observation.entities || []) {
       if (ent.y === y) chars[ent.x] = ent.id === npc.id ? 'N' : ent.id === player.id ? 'P' : 'E';
@@ -172,12 +237,43 @@ async function planNPCWithLLM(observation) {
     return chars.join('');
   });
 
-  const prompt = `You control an NPC in a tiny grid. Stay within bounds and avoid walls (#) and water (~). Action space:\n` +
-    `- move: north, south, east, west, or stay.\n` +
-    `- talk: only if adjacent to player (N/S/E/W or same cell).\n` +
-    `Pick ONE action. Respond ONLY with JSON: {"action":"move|stay|talk","direction":"north|south|east|west" (when move)}.\n` +
-    `Grid (N=row0):\n${rows.join('\n')}\n` +
-    `You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent is manhattan distance 1 or same cell.\n`;
+  const history = getObservationHistory(3);
+  const recentAttempts = getRecentAttempts(3);
+
+  const historyLines = history.map(obs => `Turn ${Math.floor(obs.turn/1000)}: I was at ${obs.location} and saw: ${obs.visibleEntities.join(',')}.`).join('\n');
+  const attemptsLines = recentAttempts.map(att => `Turn ${Math.floor(att.turn/1000)}: ${att.action} → ${att.result} (${att.reason}).`).join('\n');
+
+  const prompt = `You are an autonomous NPC with a goal to achieve.
+
+YOUR GOAL: ${npcState.goal.type} ${npcState.goal.target}
+${npcState.goal.reasoning ? `Reasoning: ${npcState.goal.reasoning}` : ''}
+
+YOUR CURRENT LOCATION: (${npc.x},${npc.y})
+
+RECENT HISTORY:
+${historyLines}
+
+RECENT ATTEMPTS:
+${attemptsLines}
+
+I am currently ${npcState.currentIntent}.
+
+Capabilities:
+- You can move north/south/east/west, stay in place, or attempt dialogue
+- Obstacles: walls (#), water (~), impassable terrain
+- Actions must be validated: you cannot walk into blocked cells
+
+Action space:
+- move: north, south, east, west, or stay
+- talk: only if adjacent to player (N/S/E/W or same cell)
+
+Your task: Pick ONE action that makes progress toward your goal. Consider obstacles and past attempts.
+
+Respond ONLY with JSON: {"action":"move|stay|talk","direction":"north|south|east|west" (when move),"intent":"briefly explain what you aim for","note":"why this action makes sense given obstacles and your goal"}.
+
+Grid (N=row0):
+${rows.join('\n')}
+You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent is manhattan distance 1 or same cell.`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
@@ -193,11 +289,11 @@ async function planNPCWithLLM(observation) {
       body: JSON.stringify({
         model: OPENROUTER_MODEL,
         messages: [
-          { role: 'system', content: 'You control movement of an NPC in a small grid world. Obey walls/bounds. Use the provided JSON schema.' },
+          { role: 'system', content: 'You are an autonomous NPC. You have a goal and use memory. You explain your intent. Output JSON.' },
           { role: 'user', content: prompt }
         ],
         temperature: 0.2,
-        max_tokens: 60
+        max_tokens: 120
       }),
       signal: controller.signal
     });
@@ -219,30 +315,136 @@ async function planNPCWithLLM(observation) {
   }
 }
 
+async function planNPCWithOLLAMA(observation) {
+  const npc = findNPC(observation);
+  const player = findPlayer(observation);
+  if (!npc || !player) return { action: 'fallback', reason: 'No NPC or player' };
+
+  addObservation(observation, npc.id);
+
+  const rows = observation.terrainRows.map((row, y) => {
+    const chars = row.split('');
+    for (const obj of observation.objects || []) {
+      if (obj.y === y) chars[obj.x] = chars[obj.x];
+    }
+    for (const ent of observation.entities || []) {
+      if (ent.y === y) chars[ent.x] = ent.id === npc.id ? 'N' : ent.id === player.id ? 'P' : 'E';
+    }
+    return chars.join('');
+  });
+
+  const history = getObservationHistory(3);
+  const recentAttempts = getRecentAttempts(3);
+
+  const historyLines = history.map(obs => `Turn ${Math.floor(obs.turn/1000)}: I was at ${obs.location} and saw: ${obs.visibleEntities.join(',')}.`).join('\n');
+  const attemptsLines = recentAttempts.map(att => `Turn ${Math.floor(att.turn/1000)}: ${att.action} → ${att.result} (${att.reason}).`).join('\n');
+
+  const prompt = `You are an autonomous NPC with a goal to achieve.
+
+YOUR GOAL: ${npcState.goal.type} ${npcState.goal.target}
+${npcState.goal.reasoning ? `Reasoning: ${npcState.goal.reasoning}` : ''}
+
+YOUR CURRENT LOCATION: (${npc.x},${npc.y})
+
+RECENT HISTORY:
+${historyLines}
+
+RECENT ATTEMPTS:
+${attemptsLines}
+
+I am currently ${npcState.currentIntent}.
+
+Capabilities:
+- You can move north/south/east/west, stay in place, or attempt dialogue
+- Obstacles: walls (#), water (~), impassable terrain
+- Actions must be validated: you cannot walk into blocked cells
+
+Action space:
+- move: north, south, east, west, or stay
+- talk: only if adjacent to player (N/S/E/W or same cell)
+
+Your task: Pick ONE action that makes progress toward your goal. Consider obstacles and past attempts.
+
+Respond ONLY with JSON: {"action":"move|stay|talk","direction":"north|south|east|west" (when move),"intent":"briefly explain what you aim for","note":"why this action makes sense given obstacles and your goal"}.
+
+Grid (N=row0):
+${rows.join('\n')}
+You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent is manhattan distance 1 or same cell.`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt: prompt,
+        stream: false,
+        options: {
+          temperature: 0.2,
+          num_predict: 120
+        }
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return { action: 'fallback', reason: `HTTP ${res.status}` };
+    const data = await res.json();
+    const text = data.response?.trim();
+    if (!text) return { action: 'fallback', reason: 'No response' };
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      return { action: 'fallback', reason: 'Parse error' };
+    }
+    return parsed;
+  } catch (e) {
+    clearTimeout(timeout);
+    return { action: 'fallback', reason: e.name === 'AbortError' ? 'Timeout' : 'Error' };
+  }
+}
+
 function performNPCAction(observation, action) {
   const npc = findNPC(observation);
   if (!npc) return 'No NPC found';
   if (!action || typeof action !== 'object') return 'NPC action invalid';
   const kind = action.action;
+  let result = '';
   if (kind === 'move') {
     const dir = DIRS[action.direction];
     if (!dir) return 'NPC move invalid direction';
-    return moveEntity(observation, npc, dir.dx, dir.dy);
+    result = moveEntity(observation, npc, dir.dx, dir.dy);
+  } else if (kind === 'talk') {
+    result = attemptDialogueNPC(observation);
+  } else if (kind === 'stay') {
+    result = 'NPC stayed';
+  } else {
+    return 'NPC action ignored';
   }
-  if (kind === 'talk') {
-    return attemptDialogueNPC(observation);
-  }
-  if (kind === 'stay') {
-    return 'NPC stayed';
-  }
-  return 'NPC action ignored';
+  return result;
 }
 
 async function stepNPC(observation, npcStepIdx) {
-  if (NPC_MODE !== 'llm') {
+  if (npcState.goal.type === 'patrol' || !OPENROUTER_API_KEY) {
     return patrolNPC(observation, npcStepIdx);
   }
-  if (!OPENROUTER_API_KEY) {
+  if (npcState.goal.type === 'ollama' && OLLAMA_BASE) {
+    const plan = await planNPCWithOLLAMA(observation);
+    if (plan.action === 'fallback') {
+      return patrolNPC(observation, npcStepIdx) + ` (fallback: ${plan.reason})`;
+    }
+    const res = performNPCAction(observation, plan);
+    if (res.includes('Blocked')) {
+      addAttempt(`move ${plan.direction || 'stay'}`, res, 'goal blocked, adapting');
+      return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (note: ${plan.note || 'moving toward goal'})`;
+    }
+    return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (intent: ${plan.intent || 'moving toward goal'})`;
+  }
+  if (NPC_MODE !== 'llm') {
     return patrolNPC(observation, npcStepIdx);
   }
   const plan = await planNPCWithLLM(observation);
@@ -250,7 +452,11 @@ async function stepNPC(observation, npcStepIdx) {
     return patrolNPC(observation, npcStepIdx) + ` (fallback: ${plan.reason})`;
   }
   const res = performNPCAction(observation, plan);
-  return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res}`;
+  if (res.includes('Blocked')) {
+    addAttempt(`move ${plan.direction || 'stay'}`, res, 'goal blocked, adapting');
+    return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (note: ${plan.note || 'moving toward goal'})`;
+  }
+  return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (intent: ${plan.intent || 'moving toward goal'})`;
 }
 
 async function start() {
@@ -290,14 +496,14 @@ async function start() {
       case 'i':
         msg = 'Inspect nearby:';
         extra = inspect(observation);
-        acted = true; // advance NPC to keep cadence simple
+        acted = true;
         break;
       case 'space':
         msg = attemptDialoguePlayer(observation);
         acted = true;
         break;
       default:
-        return; // ignore other keys
+        return;
     }
     let npcMsg = null;
     if (acted) {
