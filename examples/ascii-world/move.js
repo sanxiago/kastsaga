@@ -6,6 +6,7 @@ import path from 'node:path';
 import url from 'node:url';
 import readline from 'node:readline';
 import { loadObservation, render } from './render-lib.js';
+import { AsciiLogger } from './logger.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const inputPath = process.argv[2] || path.join(__dirname, 'world.json');
@@ -32,12 +33,16 @@ const OPENROUTER_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || 10000)
 // OLLAMA settings
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_BASE || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'glm-4.7-flash:opencode_slow_max_ctx_thinking';
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || 10000);
+
+// Logging options
+const LOG_ENABLED = process.env.LOG_FILE || process.argv.includes('--log-file');
+const logger = LOG_ENABLED ? new AsciiLogger() : null;
 
 // NPC Agency Settings
-const NPC_GOAL_TYPE = process.env.NPC_GOAL || 'protect';
-const NPC_GOAL_TARGET = process.env.NPC_GOAL_TARGET || 'chest';
-const NPC_GOAL_REASONING = process.env.NPC_GOAL_REASONING || '';
+const NPC_GOAL_TYPE = process.env.NPC_GOAL ?? 'protect';
+const NPC_GOAL_TARGET = process.env.NPC_GOAL_TARGET ?? 'chest';
+const NPC_GOAL_REASONING = process.env.NPC_GOAL_REASONING ?? '';
 
 function findPlayer(observation) {
   return observation.entities.find(e => e.role === 'player') || observation.entities[0];
