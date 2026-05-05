@@ -26,10 +26,10 @@ class AsciiLogger {
   }
 
   // Action proposal before planning
-  actionProposed(actorId, actionType, direction = null, intent = null) {
+  actionProposed(actorId, actionType, direction = null, intent = null, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'action.proposed',
       correlationId: this.correlationId,
       actor: actorId,
@@ -43,10 +43,10 @@ class AsciiLogger {
   }
 
   // Action validation result
-  actionValidated(actorId, actionType, direction, validity, reason) {
+  actionValidated(actorId, actionType, direction, validity, reason, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'action.validated',
       correlationId: this.correlationId,
       actor: actorId,
@@ -60,27 +60,27 @@ class AsciiLogger {
   }
 
   // Action execution result
-  actionExecuted(actorId, actionType, direction, result, note = null) {
+  actionExecuted(actorId, actionType, direction, result, note = null, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'action.executed',
       correlationId: this.correlationId,
       actor: actorId,
       actionType: actionType,
       direction: direction,
       result: result,
-      note: note,
+      intent: note,
       backend: null
     };
     this.log(entry);
   }
 
-  // Backend decision (LLM/OLLAMA response)
-  backendDecision(correlationId, backend, model, action, reasoning, errorMessage = null) {
+  // Backend decision result
+  backendDecision(correlationId, backend, model, action, reasoning, errorMessage = null, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'backend.decision',
       correlationId: correlationId,
       backend: backend,
@@ -92,11 +92,11 @@ class AsciiLogger {
     this.log(entry);
   }
 
-  // Timeout event
-  timeout(actorId, backend, model, budgetMs, elapsedMs, fallbackAction) {
+  // Timeout occurred
+  timeout(actorId, backend, model, budgetMs, elapsedMs, fallbackAction, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'timeout',
       correlationId: this.correlationId,
       actor: actorId,
@@ -109,26 +109,26 @@ class AsciiLogger {
     this.log(entry);
   }
 
-  // Error event
-  error(actorId, errorType, errorMessage, context = null) {
+  // Error occurred
+  error(actorId, errorType, errorMessage, context = null, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'error',
       correlationId: this.correlationId,
       actor: actorId,
       errorType: errorType,
       errorMessage: errorMessage,
-      context: context
+      ...context
     };
     this.log(entry);
   }
 
   // Dialogue attempt (may be guardrail-rejected)
-  dialogueAttempt(speakerId, listenerId, utterance, guardrailResult, guardrailRule = null) {
+  dialogueAttempt(speakerId, listenerId, utterance, guardrailResult, guardrailRule = null, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'dialogue.attempt',
       correlationId: this.correlationId,
       speaker: speakerId,
@@ -141,10 +141,10 @@ class AsciiLogger {
   }
 
   // Redaction event (if sensitive data needs to be redacted)
-  redaction(correlationId, originalLocation, redactedField, reason) {
+  redaction(correlationId, originalLocation, redactedField, reason, tick = null) {
     const entry = {
       timestamp: Date.now(),
-      tick: null, // Updated by caller
+      tick: tick,
       event: 'redaction',
       correlationId: correlationId,
       originalLocation: originalLocation,

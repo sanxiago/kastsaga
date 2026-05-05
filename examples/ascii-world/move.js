@@ -38,6 +38,7 @@ const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || 10000);
 // Logging options
 const LOG_ENABLED = process.env.LOG_FILE || process.argv.includes('--log-file');
 const logger = LOG_ENABLED ? new AsciiLogger() : null;
+let tickCounter = 0; // Global tick counter for logging
 
 // NPC Agency Settings
 const NPC_GOAL_TYPE = process.env.NPC_GOAL ?? 'protect';
@@ -229,7 +230,13 @@ async function planNPCWithLLM(observation) {
   const player = findPlayer(observation);
   if (!npc || !player) return { action: 'fallback', reason: 'No NPC or player' };
 
-  addObservation(observation, npc.id);
+  tickCounter++;
+
+  addObservation(observation, npcId);
+  const correlationId = logger ? logger.setCorrelation(`npc-${npc.id}-tick${tickCounter}`) : null;
+  logger?.actionProposed(npc.id, 'llm-decision', null, npcState.currentIntent, tickCounter);
+
+  const startTime = Date.now();
 
   const rows = observation.terrainRows.map((row, y) => {
     const chars = row.split('');
@@ -304,7 +311,11 @@ You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent 
     });
     clearTimeout(timeout);
     if (!res.ok) return { action: 'fallback', reason: `HTTP ${res.status}` };
+    const correlationId = logger ? logger.setCorrelation(`npc-${npc.id}-tick${tickCounter}`) : null;
+    const modelName = typeof OPENROUTER_MODEL === 'string' ? OPENROUTER_MODEL : 'openrouter/auto';
+    const elapsed = Date.now() - startTime;
     const data = await res.json();
+    logger?.backendDecision(correlationId,  'openrouter',  modelName,  plan.action,  plan.intent, tickCounter);
     const text = data.choices?.[0]?.message?.content?.trim();
     if (!text) return { action: 'fallback', reason: 'No content' };
     let parsed = null;
@@ -316,6 +327,11 @@ You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent 
     return parsed;
   } catch (e) {
     clearTimeout(timeout);
+    const elapsed = Date.now() - startTime;
+    const modelName = typeof OPENROUTER_MODEL === 'string' ? OPENROUTER_MODEL : 'openrouter/auto';
+    const fallbackAction = npcState.goal.type === 'patrol' ? { action: 'patrol' } : null;
+    logger?.timeout(npc.id, 'openrouter', modelName, OPENROUTER_TIMEOUT_MS, elapsed, fallbackAction, tickCounter);
+    logger?.error(npc.id, e.name === 'AbortError' ? 'TIMEOUT' : 'API_ERROR', e.message, { correlationId }, tickCounter);
     return { action: 'fallback', reason: e.name === 'AbortError' ? 'Timeout' : 'Error' };
   }
 }
@@ -325,7 +341,11 @@ async function planNPCWithOLLAMA(observation) {
   const player = findPlayer(observation);
   if (!npc || !player) return { action: 'fallback', reason: 'No NPC or player' };
 
-  addObservation(observation, npc.id);
+  tickCounter++;
+  const correlationId = logger ? logger.setCorrelation(`npc-${npc.id}-tick${tickCounter}`) : null;
+  logger?.actionProposed(npc.id, 'ollama-decision', null, npcState.currentIntent, tickCounter);
+
+  const startTime = Date.now();
 
   const rows = observation.terrainRows.map((row, y) => {
     const chars = row.split('');
@@ -397,7 +417,11 @@ You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent 
     });
     clearTimeout(timeout);
     if (!res.ok) return { action: 'fallback', reason: `HTTP ${res.status}` };
+    const correlationId = logger ? logger.setCorrelation(`npc-${npc.id}-tick${tickCounter}`) : null;
+    const modelName = typeof OLLAMA_MODEL === 'string' ? OLLAMA_MODEL : 'glm-4.7-flash:opencode_slow_max_ctx_thinking';
+    const elapsed = Date.now() - startTime;
     const data = await res.json();
+    logger?.backendDecision(correlationId,  'ollama',  modelName,  plan.action,  plan.intent, tickCounter);
     const text = data.response?.trim();
     if (!text) return { action: 'fallback', reason: 'No response' };
     let parsed = null;
@@ -409,6 +433,11 @@ You (NPC) at (${npc.x},${npc.y}). Player at (${player.x},${player.y}). Adjacent 
     return parsed;
   } catch (e) {
     clearTimeout(timeout);
+    const elapsed = Date.now() - startTime;
+    const modelName = typeof OLLAMA_MODEL === 'string' ? OLLAMA_MODEL : 'glm-4.7-flash:opencode_slow_max_ctx_thinking';
+    const fallbackAction = npcState.goal.type === 'patrol' ? { action: 'patrol' } : null;
+    logger?.timeout(npc.id, 'ollama', OLLAMA_MODEL, OLLAMA_TIMEOUT_MS, elapsed, fallbackAction, tickCounter);
+    logger?.error(npc.id, e.name === 'AbortError' ? 'TIMEOUT' : 'API_ERROR', e.message, { correlationId }, tickCounter);
     return { action: 'fallback', reason: e.name === 'AbortError' ? 'Timeout' : 'Error' };
   }
 }
@@ -434,11 +463,16 @@ function performNPCAction(observation, action) {
 }
 
 async function stepNPC(observation, npcStepIdx) {
+  tickCounter++;
+  const correlationId = logger ? logger.setCorrelation(`npc-${npc.id}-tick${tickCounter}`) : null;
+
   if (npcState.goal.type === 'patrol' || !OPENROUTER_API_KEY) {
+    logger?.actionProposed(npc.id, 'patrol', null, 'following patrol route', tickCounter);
     return patrolNPC(observation, npcStepIdx);
   }
   if (npcState.goal.type === 'ollama' && OLLAMA_BASE) {
     const plan = await planNPCWithOLLAMA(observation);
+    logger?.actionValidated(npc.id, plan.action, plan.direction || 'stay', 'accepted', 'LLM plan validated', tickCounter);
     if (plan.action === 'fallback') {
       return patrolNPC(observation, npcStepIdx) + ` (fallback: ${plan.reason})`;
     }
@@ -447,12 +481,14 @@ async function stepNPC(observation, npcStepIdx) {
       addAttempt(`move ${plan.direction || 'stay'}`, res, 'goal blocked, adapting');
       return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (note: ${plan.note || 'moving toward goal'})`;
     }
+    logger?.actionExecuted(npc.id, plan.action, plan.direction || 'stay', res, plan.intent || 'moving toward goal', tickCounter);
     return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (intent: ${plan.intent || 'moving toward goal'})`;
   }
   if (NPC_MODE !== 'llm') {
     return patrolNPC(observation, npcStepIdx);
   }
   const plan = await planNPCWithLLM(observation);
+  logger?.actionValidated(npc.id, plan.action, plan.direction || 'stay', 'accepted', 'LLM plan validated', tickCounter);
   if (plan.action === 'fallback') {
     return patrolNPC(observation, npcStepIdx) + ` (fallback: ${plan.reason})`;
   }
@@ -461,7 +497,24 @@ async function stepNPC(observation, npcStepIdx) {
     addAttempt(`move ${plan.direction || 'stay'}`, res, 'goal blocked, adapting');
     return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (note: ${plan.note || 'moving toward goal'})`;
   }
+  logger?.actionExecuted(npc.id, plan.action, plan.direction || 'stay', res, plan.intent || 'moving toward goal', tickCounter);
   return `NPC action (${plan.action}${plan.direction ? ' ' + plan.direction : ''}): ${res} (intent: ${plan.intent || 'moving toward goal'})`;
+}
+
+async function inspect(observation) {
+  const player = findPlayer(observation);
+  if (!player) return ['No player entity found'];
+  const lines = ['Player at:', `Coordinates: (${player.x}, ${player.y})`];
+  const nearby = describeCell(observation, player.x, player.y);
+  if (nearby.length > 0) {
+    lines.push('Around player:');
+    for (const desc of nearby) {
+      lines.push(`  - ${desc}`);
+    }
+  } else {
+    lines.push('Empty cell (no terrain, objects, or entities)');
+  }
+  return lines;
 }
 
 async function start() {
@@ -506,6 +559,9 @@ async function start() {
       case 'space':
         msg = attemptDialoguePlayer(observation);
         acted = true;
+        tickCounter++;
+        const dialogueCorrId = logger ? logger.setCorrelation(`player-player-tick${tickCounter}`) : null;
+        logger?.dialogueAttempt('player', npc.id, 'hello', 'accepted', null, tickCounter);
         break;
       default:
         return;
