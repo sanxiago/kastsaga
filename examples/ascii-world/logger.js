@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Structured logging utilities for ASCII world demo
+import { createWriteStream } from 'node:fs';
 // Meets the logging spec requirements:
 // - Structured JSON log entries
 // - Correlation IDs for traceability
@@ -22,7 +23,7 @@ class AsciiLogger {
 
   setCorrelation(correlationId) {
     this.correlationId = correlationId;
-    return this;
+    return correlationId;
   }
 
   // Action proposal before planning
@@ -182,7 +183,7 @@ class FileLogger {
     this.filePath = filePath;
     this.logger = new AsciiLogger({
       write: str => {
-        const stream = require('fs').createWriteStream(filePath, { flags: 'a' });
+        const stream = createWriteStream(filePath, { flags: 'a' });
         stream.write(str + '\n');
         stream.end();
       }
@@ -198,7 +199,4 @@ class FileLogger {
   }
 }
 
-module.exports = {
-  AsciiLogger,
-  FileLogger
-};
+export { AsciiLogger, FileLogger };

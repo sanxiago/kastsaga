@@ -13,55 +13,33 @@ Add structured logging to `examples/ascii-world/move.js` to comply with the Open
 
 ### High Priority (Required for Spec Compliance)
 
-- [ ] **Add logging to `planNPCWithLLM` function**
+- [x] **Add logging to `planNPCWithLLM` function**
   - Log action proposal before API call
   - Log backend decision with model info
   - Log timeout/error when API fails
 
-  Location: Around line 228-313 in move.js
-  ```javascript
-  // Before API call
-  logger.actionProposed(npc.id, 'llm-decision', null, npcState.currentIntent);
-  logger.backendDecision(correlationId, 'openrouter', OPENROUTER_MODEL, action, reasoning);
-
-  // In timeout handler
-  logger.timeout(npc.id, 'openrouter', OPENROUTER_MODEL, OPENROUTER_TIMEOUT_MS, elapsed, fallback);
-  logger.error(npc.id, e.name, errorMsg, { correlationId });
-  ```
-
-- [ ] **Add logging to `planNPCWithOLLAMA` function**
+- [x] **Add logging to `planNPCWithOLLAMA` function**
   - Log action proposal with context
   - Log backend decision
   - Log timeout/error handling
   - Track correlation IDs per NPC tick
 
-  Location: Around line 298-406 in move.js
-
-- [ ] **Add logging to `stepNPC` function**
+- [x] **Add logging to `stepNPC` function**
   - Create correlation ID for each tick
   - Log all NPC actions before validation
   - Log validation results (accept/reject)
   - Log execution results
   - Add tick numbers to all logged entries
 
-  Location: Around line 408-486 in move.js
-
-- [ ] **Add logging for player actions**
+- [x] **Add logging for player actions**
   - Log player movement actions
   - Log validation failures
   - Log dialogue attempts
 
-  Location: In `keypress` handler around line 487-502
-
-- [ ] **Add tick counter tracking**
-  - Create global `tickCounter` variable
-  - Update tickCounter before each logged action
-  - Include tick in all log entries (timestamp + tick)
-
-  ```javascript
-  let tickCounter = 0; // Add at top of file
-  tickCounter++; // Before logging action
-  ```
+- [x] **Add tick counter tracking**
+  - Global `tickCounter` variable exists
+  - Incremented once per turn in `stepNPC`
+  - Included in all log entries
 
 ### Medium Priority (Enhanced Observability)
 
